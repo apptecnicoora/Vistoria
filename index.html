@@ -226,6 +226,14 @@ except Exception as e:
     st.stop()
 
 
+# FUNÇÃO CALLBACK PARA ATUALIZAR AGENDA COM 1 CLIQUE
+def concluir_tarefa_agenda(linha_planilha):
+    try:
+        sheet_agenda.update_cell(linha_planilha, 3, "Concluído")
+    except Exception as e:
+        pass
+
+
 # FILTROS DA TABELA PRINCIPAL
 busca_input = st.session_state.get('busca_input', '')
 status_input = st.session_state.get('status_input', 'Todos')
@@ -294,20 +302,16 @@ if not df_agenda.empty:
                 html_card = f'<div class="alerta-card {cls}"><strong>{tag}:</strong> {row["tarefa"]}<br><small>Prazo era: {row["data_hora"]}</small></div>'
                 st.sidebar.markdown(html_card, unsafe_allow_html=True)
                 
-                # BOTÃO DIRETO SEM CHECKBOX
-                if st.sidebar.button("✅ Concluir", key=f"side_btn_{idx}", type="primary", use_container_width=True):
-                    sheet_agenda.update_cell(int(idx) + 2, 3, "Concluído")
-                    st.rerun()
-                st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espacinho para separar os cards
+                # BOTÃO COM GATILHO DIRETO (CALLBACK) - 1 CLIQUE SÓ!
+                st.sidebar.button("✅ Concluir", key=f"side_btn_{idx}", type="primary", use_container_width=True, on_click=concluir_tarefa_agenda, args=(int(idx) + 2,))
+                st.sidebar.markdown("<br>", unsafe_allow_html=True)
             except:
                 html_card = f'<div class="alerta-card alerta-pendente">📌 {row["tarefa"]}</div>'
                 st.sidebar.markdown(html_card, unsafe_allow_html=True)
                 
-                # BOTÃO DIRETO SEM CHECKBOX
-                if st.sidebar.button("✅ Concluir", key=f"side_btn_err_{idx}", type="primary", use_container_width=True):
-                    sheet_agenda.update_cell(int(idx) + 2, 3, "Concluído")
-                    st.rerun()
-                st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espacinho para separar os cards
+                # BOTÃO COM GATILHO DIRETO (CALLBACK) - 1 CLIQUE SÓ!
+                st.sidebar.button("✅ Concluir", key=f"side_btn_err_{idx}", type="primary", use_container_width=True, on_click=concluir_tarefa_agenda, args=(int(idx) + 2,))
+                st.sidebar.markdown("<br>", unsafe_allow_html=True)
 else:
     st.sidebar.write("Sem tarefas registradas.")
 
