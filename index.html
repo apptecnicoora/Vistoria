@@ -1,800 +1,769 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vistoria Técnica - Ora Empresas</title>
-    <link rel="manifest" href="./manifest.json">
-    <meta name="theme-color" content="#0056b3">
-    <style>
-        /* TEMA ORA EMPRESAS - VERSÃO TECH */
-        :root {
-            --cor-acento-tech: #0056b3; 
-            --cor-brilho-tech: rgba(0, 123, 255, 0.5); 
-            --preto-fundo: #000000;
-            --preto-texto: #1A1A1A;
-            --branco: #FFFFFF;
-            --cinza-borda: #E2E8F0;
-            --cinza-fundo-card: #F8FAFC;
-        }
+import streamlit as st
+import pandas as pd
+import gspread
+import calendar
+from google.oauth2.service_account import Credentials
+from datetime import datetime, timedelta, timezone, date
+import os 
+import base64
+from PIL import Image
 
-        body {
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--preto-fundo);
-            padding: 20px 10px;
-            margin: 0;
-            color: var(--preto-texto);
-        }
+# === CONFIGURAÇÃO DA PÁGINA E LOGO ===
+caminho_logo = 'logo_ora.png' 
+icone_aba = "🚀"
+logo_valida = False
+logo_b64 = ""
 
-        .container {
-            max-width: 700px;
-            background-color: var(--branco);
-            margin: 0 auto;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0, 86, 179, 0.15);
-            border-top: 8px solid var(--cor-acento-tech);
-        }
+if os.path.exists(caminho_logo):
+    try:
+        img_teste = Image.open(caminho_logo)
+        img_teste.verify() 
+        icone_aba = Image.open(caminho_logo) 
+        logo_valida = True
+        with open(caminho_logo, "rb") as image_file:
+            logo_b64 = base64.b64encode(image_file.read()).decode()
+    except Exception:
+        logo_valida = False
+
+st.set_page_config(
+    page_title="Sistema de Controle | Dashboard",
+    page_icon=icone_aba, 
+    layout="wide"
+)
+
+# === FUNÇÕES AUXILIARES ===
+def safe_int(v):
+    try: return int(float(v))
+    except: return 0
+
+def safe_idx(lst, val, default=0):
+    v = str(val).strip().lower()
+    for i, item in enumerate(lst):
+        if str(item).strip().lower() == v: return i
+    return default
+
+# === CONFIGURAÇÃO DE DATAS ===
+fuso_local = timezone(timedelta(hours=-3))
+agora = datetime.now(fuso_local)
+hoje_dt = agora.date()
+hoje_str = agora.strftime("%d/%m/%Y")
+amanha_str = (agora + timedelta(days=1)).strftime("%d/%m/%Y")
+hoje_iso = agora.strftime("%Y-%m-%d")
+amanha_iso = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+
+if 'cal_date' not in st.session_state: st.session_state.cal_date = agora.date()
+if 'cal_month' not in st.session_state: st.session_state.cal_month = agora.month
+if 'cal_year' not in st.session_state: st.session_state.cal_year = agora.year
+
+# === ESTILIZAÇÃO CSS ===
+st.markdown("""
+<style>
+[data-testid="stSidebar"] > div:first-child { padding-top: 1.5rem !important; }
+.block-container { padding-top: 2rem !important; }
+
+/* HEADER PREMIUM COM SUPORTE PARA LOGO NA DIREITA */
+.premium-header { 
+    background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%); 
+    padding: 30px 40px; 
+    border-radius: 12px; 
+    border: 1px solid #334155; 
+    margin-bottom: 30px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3); 
+}
+.header-content-left { display: flex; align-items: center; }
+
+/* EFEITO NEON E TAMANHO GIGANTE NA LOGO DA EMPRESA */
+.header-logo-img {
+    max-height: 160px; 
+    width: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 0 3px rgba(255,255,255,0.5)) drop-shadow(0 0 10px rgba(59, 130, 246, 0.9)) drop-shadow(0 0 20px rgba(59, 130, 246, 0.7));
+    transition: all 0.3s ease;
+}
+.header-logo-img:hover {
+    filter: drop-shadow(0 0 5px rgba(255,255,255,0.8)) drop-shadow(0 0 15px rgba(59, 130, 246, 1)) drop-shadow(0 0 30px rgba(59, 130, 246, 0.9));
+    transform: scale(1.03);
+}
+
+/* FOGUETE NEON REALISTA */
+.neon-rocket-container {
+    margin-right: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: rocket-float 3s ease-in-out infinite, rocket-glow-pulse 1.5s infinite alternate;
+}
+.neon-rocket-svg {
+    width: 50px; height: 50px; fill: none; stroke: #e0f2fe; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #3b82f6) drop-shadow(0 0 12px #3b82f6);
+}
+@keyframes rocket-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes rocket-glow-pulse {
+    from { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #3b82f6) drop-shadow(0 0 12px #3b82f6); }
+    to { filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 9px #60a5fa) drop-shadow(0 0 18px #60a5fa); }
+}
+
+/* TÍTULO REFINADO */
+.header-title-wrapper { display: flex; flex-direction: column; justify-content: center; }
+.header-title { 
+    font-size: 34px; font-weight: 900; background: linear-gradient(to right, #ffffff, #e2e8f0); 
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; 
+    margin: 0; padding: 0; line-height: 1.1; font-family: 'Segoe UI', system-ui, sans-serif; 
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}
+.header-title span { color: #3b82f6; -webkit-text-fill-color: #3b82f6; text-shadow: 0 0 10px rgba(59,130,246,0.4); } 
+.header-subtitle { 
+    font-size: 14px; color: #cbd5e1; font-weight: 600; margin-top: 8px; letter-spacing: 1.5px; 
+    text-transform: uppercase; border-left: 3px solid #3b82f6; padding-left: 10px;
+}
+
+/* ANIMAÇÕES NEON PULSANTES */
+@keyframes pulse-red { 0%, 100% { border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 5px rgba(239, 68, 68, 0.2); } 50% { border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 12px rgba(239, 68, 68, 0.5); } }
+@keyframes pulse-blue { 0%, 100% { border-color: rgba(59, 130, 246, 0.4); box-shadow: 0 0 5px rgba(59, 130, 246, 0.2); } 50% { border-color: rgba(59, 130, 246, 1); box-shadow: 0 0 12px rgba(59, 130, 246, 0.5); } }
+@keyframes pulse-green { 0%, 100% { border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 5px rgba(16, 185, 129, 0.2); } 50% { border-color: rgba(16, 185, 129, 1); box-shadow: 0 0 12px rgba(16, 185, 129, 0.5); } }
+@keyframes pulse-orange { 0%, 100% { border-color: rgba(245, 158, 11, 0.4); box-shadow: 0 0 5px rgba(245, 158, 11, 0.2); } 50% { border-color: rgba(245, 158, 11, 1); box-shadow: 0 0 12px rgba(245, 158, 11, 0.5); } }
+@keyframes pulse-yellow { 0%, 100% { border-color: rgba(234, 179, 8, 0.4); box-shadow: 0 0 5px rgba(234, 179, 8, 0.2); } 50% { border-color: rgba(234, 179, 8, 1); box-shadow: 0 0 12px rgba(234, 179, 8, 0.5); } }
+@keyframes pulse-gray { 0%, 100% { border-color: rgba(148, 163, 184, 0.3); box-shadow: 0 0 5px rgba(148, 163, 184, 0.1); } 50% { border-color: rgba(148, 163, 184, 0.8); box-shadow: 0 0 12px rgba(148, 163, 184, 0.4); } }
+
+/* GRID DE MÉTRICAS */
+.neon-metric-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
+.neon-metric-card { background-color: #0f172a; padding: 18px; border-radius: 12px; text-align: center; border: 1px solid #1e293b; transition: 0.3s; }
+.neon-metric-card:hover { transform: translateY(-2px); }
+.neon-metric-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #94a3b8; margin-bottom: 5px; }
+.neon-metric-value { font-size: 30px; font-weight: 800; color: #ffffff; line-height: 1; }
+.neon-metric-sub { font-size: 10px; color: #64748b; margin-top: 8px; font-weight: 600; }
+.m-total { animation: pulse-blue 3.5s infinite; }
+.m-atraso { animation: pulse-red 2.5s infinite; }
+.m-pausado { animation: pulse-yellow 3s infinite; } 
+.m-taxa { animation: pulse-green 3s infinite; }
+.m-nao-iniciado { animation: pulse-gray 4s infinite; }
+.m-planejamento { animation: pulse-orange 3s infinite; }
+.m-andamento { animation: pulse-blue 2.8s infinite; }
+.m-finalizado { animation: pulse-green 2.8s infinite; }
+
+/* CARDS DE RESUMO */
+.resumo-card { background-color: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 5px; min-height: 160px; }
+.resumo-card-title { font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 12px; }
+.resumo-item { font-size: 13px; color: #cbd5e1; display: flex; align-items: flex-start; gap: 6px; margin-bottom: 6px; }
+.res-hoje-proj { border-left: 4px solid #3b82f6; } 
+.res-hoje-agen { border-left: 4px solid #10b981; } 
+.res-amanha-proj { border-left: 4px solid #f59e0b; } 
+.res-amanha-agen { border-left: 4px solid #8b5cf6; } 
+
+/* ALERTAS */
+.alerta-card { background-color: #1e293b; color: #cbd5e1; padding: 12px 14px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 5px; font-size: 13px; }
+.alerta-atrasado { border-left: 4px solid #ef4444; color: #f87171; animation: pulse-red 2s infinite; }
+.alerta-pendente { border-left: 4px solid #3b82f6; color: #60a5fa; animation: pulse-blue 2s infinite; }
+
+/* TABELA MODERNA DARK */
+.modern-table-container { width: 100%; overflow-x: auto; border-radius: 8px; margin-top: 15px; border: 1px solid #111; }
+.modern-table { width: 100%; border-collapse: collapse; background-color: #1e293b; }
+.modern-table th { background-color: #111827; color: #fff; font-weight: 700; padding: 14px; text-align: left; font-size: 13px; text-transform: uppercase; }
+.modern-table td { padding: 11px 14px; border-bottom: 1px solid #000; color: #d1d5db; font-size: 14px; }
+.modern-table tbody tr:hover { background-color: #2d3748; }
+.status-badge { padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; display: inline-block; text-transform: uppercase; }
+.badge-nao-iniciado { background-color: #4b5563; color: #f3f4f6; }
+.badge-planejamento { background-color: #f59e0b; color: #ffffff; }
+.badge-em-andamento { background-color: #2563eb; color: #ffffff; }
+.badge-pausado { background-color: #ca8a04; color: #ffffff; } 
+.badge-finalizado { background-color: #059669; color: #ffffff; }
+.badge-cancelado { background-color: #dc2626; color: #ffffff; }
+
+/* KANBAN */
+.k-col-container { background-color: #0f172a; padding: 15px; border-radius: 8px; min-height: 400px; border: 1px solid #1e293b; }
+.k-col-header { color: #f8fafc; font-weight: 800; font-size: 16px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #334155; }
+.k-card { background-color: #1e293b; padding: 14px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #334155; }
+.k-card-title { font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 10px; }
+</style>
+""", unsafe_allow_html=True)
+
+# === CONEXÃO GOOGLE SHEETS ===
+def conectar_planilha():
+    escopos = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    info_provedor = dict(st.secrets["gcp_service_account"])
+    info_provedor["private_key"] = info_provedor["private_key"].replace("\\n", "\n")
+    credenciais = Credentials.from_service_account_info(info_provedor, scopes=escopos)
+    cliente = gspread.authorize(credenciais)
+    planilha_base = cliente.open("base_controle_infraestrutura")
+    return planilha_base.sheet1, planilha_base.worksheet("Agenda")
+
+try:
+    sheet_projetos, sheet_agenda = conectar_planilha()
+    
+    colunas_completas = [
+        "protocolo", "cliente", "visita", "instalacao", "status", 
+        "ap_mod", "ap_qtd", "ap_st", "gw_mod", "gw_qtd", 
+        "gw_st", "sw_mod", "sw_qtd", "sw_st", "obs", "obs_andamento",
+        "hr_visita", "hr_inst", "cabo_tipo", "cabo_qtd", "rack_tam",
+        "ext_mod", "ext_qtd", "ext_st", "data_atualizacao"
+    ]
+
+    dados_projetos = sheet_projetos.get_all_records()
+    if dados_projetos:
+        df_projetos = pd.DataFrame(dados_projetos)
+        df_projetos.columns = df_projetos.columns.str.strip().str.lower()
+        for col in colunas_completas:
+            if col not in df_projetos.columns: df_projetos[col] = ""
+        for col in df_projetos.columns: df_projetos[col] = df_projetos[col].astype(str).str.strip()
         
-        .header {
-            text-align: center;
-            margin-bottom: 25px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid var(--cinza-borda);
-        }
-
-        .logo {
-            max-width: 200px;
-            height: auto;
-        }
-
-        h1 {
-            color: var(--cor-acento-tech);
-            font-size: 22px;
-            text-transform: uppercase;
-            font-weight: 900;
-            margin-top: 15px;
-            letter-spacing: 1.5px;
-            text-shadow: 1px 1px 0px rgba(0,0,0,0.1);
-        }
-
-        .card {
-            background: var(--cinza-fundo-card);
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border: 1px solid var(--cinza-borda);
-            border-left: 5px solid var(--cor-acento-tech);
-        }
-
-        .card-title {
-            color: var(--cor-acento-tech);
-            font-size: 16px;
-            margin-top: 0;
-            margin-bottom: 15px;
-            text-transform: uppercase;
-            font-weight: bold;
-            letter-spacing: 0.5px;
-        }
-
-        .form-group { margin-bottom: 15px; }
-        .form-row { display: flex; gap: 10px; }
-        .form-row .form-group { flex: 1; }
+        df_projetos['data_atualizacao'] = df_projetos['data_atualizacao'].replace(["", "nan", "None"], hoje_str)
+    else:
+        df_projetos = pd.DataFrame(columns=colunas_completas)
         
-        label {
-            display: block;
-            font-weight: bold;
-            font-size: 13px;
-            margin-bottom: 6px;
-            color: #333;
-        }
+    dados_agenda = sheet_agenda.get_all_records()
+    if dados_agenda:
+        df_agenda = pd.DataFrame(dados_agenda)
+        df_agenda.columns = df_agenda.columns.str.strip().str.lower()
+        for col in df_agenda.columns: df_agenda[col] = df_agenda[col].astype(str).str.strip()
+    else:
+        df_agenda = pd.DataFrame(columns=["tarefa", "data_hora", "status"])
 
-        input[type="text"], input[type="date"], input[type="number"], select, input[type="file"], input[type="url"] {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #CBD5E1;
-            border-radius: 6px;
-            font-size: 14px;
-            box-sizing: border-box;
-            outline: none;
-            transition: border-color 0.3s, box-shadow 0.3s;
-            font-family: inherit;
-            background: var(--branco);
-        }
+except Exception as e:
+    st.error(f"Erro ao conectar à planilha. Detalhe: {e}")
+    st.stop()
 
-        input:focus, select:focus {
-            border-color: var(--cor-brilho-tech);
-            box-shadow: 0 0 10px rgba(0, 123, 255, 0.4);
-        }
 
-        input[type="file"] { padding: 9px; cursor: pointer; }
+# FILTROS DA TABELA PRINCIPAL
+busca_input = st.session_state.get('busca_input', '')
+status_input = st.session_state.get('status_input', 'Todos')
 
-        .checkbox-group {
-            display: flex;
-            align-items: flex-start;
-            background: var(--branco);
-            padding: 12px;
-            border: 1px solid #CBD5E1;
-            border-radius: 6px;
-            margin-bottom: 8px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
+df_filtrado = df_projetos.copy()
+if busca_input and not df_filtrado.empty:
+    df_filtrado = df_filtrado[df_filtrado['cliente'].astype(str).str.contains(busca_input, case=False) | df_filtrado['protocolo'].astype(str).str.contains(busca_input)]
+if status_input != "Todos" and not df_filtrado.empty:
+    df_filtrado = df_filtrado[df_filtrado['status'].str.lower() == status_input.lower()]
 
-        .checkbox-group:hover {
-            border-color: var(--cor-brilho-tech);
-            box-shadow: 0 0 10px rgba(0, 123, 255, 0.1);
-        }
-
-        .checkbox-group input {
-            margin-right: 12px;
-            width: 18px;
-            height: 18px;
-            accent-color: var(--cor-acento-tech);
-            margin-top: 2px;
-        }
-
-        .checkbox-group label {
-            margin-bottom: 0;
-            font-weight: normal;
-            font-size: 13px;
-            cursor: pointer;
-            line-height: 1.4;
-            color: #444;
-        }
-
-        button {
-            width: 100%;
-            padding: 18px;
-            background-color: var(--cor-acento-tech);
-            color: var(--branco);
-            border: none;
-            border-radius: 6px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: background-color 0.3s, box-shadow 0.3s, transform 0.2s;
-            margin-top: 10px;
-            margin-bottom: 20px;
-        }
-
-        button:hover {
-            background-color: #007bff; 
-            box-shadow: 0 0 15px rgba(0, 123, 255, 0.6);
-            transform: scale(1.02);
-        }
-        
-        button.btn-secundario {
-            background-color: #444;
-            margin: 0;
-            padding: 0 15px;
-            width: auto;
-            font-size: 14px;
-            white-space: nowrap;
-        }
-
-        button.btn-secundario:hover {
-            background-color: #666;
-            box-shadow: 0 0 10px rgba(100, 100, 100, 0.3);
-        }
-
-        /* Estilos dos botões de ação final */
-        .botoes-acao {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        button.btn-acao {
-            margin: 0;
-            padding: 15px 10px;
-            font-size: 14px;
-            flex: 1 1 calc(50% - 10px);
-            min-width: 140px;
-        }
-
-        button.btn-whatsapp { background-color: #25D366; color: white; }
-        button.btn-whatsapp:hover { background-color: #20b858; }
-        
-        button.btn-telegram { background-color: #0088cc; color: white; }
-        button.btn-telegram:hover { background-color: #0099e6; }
-        
-        button.btn-editar { background-color: #ff9800; color: #fff;}
-        button.btn-editar:hover { background-color: #e68a00; }
-        
-        button.btn-imprimir { background-color: var(--preto-fundo); border: 1px solid var(--cor-acento-tech); }
-        button.btn-imprimir:hover { background-color: #333; }
-
-        #resultado {
-            display: none;
-            background: #fdfdfd;
-            border: 2px solid var(--cor-acento-tech);
-            border-left: 10px solid var(--cor-acento-tech);
-        }
-        
-        .secao-res {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: var(--branco);
-            border-radius: 6px;
-            border: 1px solid #eee;
-        }
-
-        .secao-res h3 {
-            color: var(--cor-acento-tech);
-            font-size: 16px;
-            border-bottom: 2px solid var(--cor-acento-tech);
-            padding-bottom: 5px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-        }
-        
-        ul { padding-left: 10px; list-style-type: none; transition: 0.3s; }
-        li {
-            margin-bottom: 10px;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #333;
-            outline: none;
-            display: flex;
-            align-items: flex-start;
-        }
-
-        /* NOVA LÓGICA DE EXCLUSÃO (BOTÃO ✖) */
-        .remover-item {
-            color: #dc3545;
-            cursor: pointer;
-            font-weight: bold;
-            margin-right: 8px;
-            display: none;
-            user-select: none;
-            font-family: sans-serif;
-            font-size: 14px;
-            flex-shrink: 0;
-            padding: 2px 5px;
-            background: #ffe6e6;
-            border-radius: 4px;
-            transition: 0.2s;
-        }
-        
-        .remover-item:hover {
-            background: #ffcccc;
-            transform: scale(1.1);
-        }
-
-        /* Só mostra o ✖ quando o modo-edicao estiver ativo */
-        .modo-edicao .remover-item {
-            display: inline-block;
-        }
-
-        .alerta-item { color: #007bff; font-weight: bold; }
-        .dica-item { color: #1a1a1a; font-weight: bold; }
-
-        .critico {
-            background: var(--cor-acento-tech);
-            color: var(--branco);
-            padding: 15px;
-            border-radius: 6px;
-            text-align: center;
-            font-weight: bold;
-            margin-bottom: 20px;
-            font-size: 15px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            box-shadow: 0 0 20px rgba(0, 123, 255, 0.6);
-        }
-
-        #div_gamer_opcoes, #div_stands_opcoes {
-            display: none;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px dashed #ccc;
-        }
-        
-        .img-anexo {
-            max-width: 100%;
-            max-height: 400px;
-            border-radius: 8px;
-            border: 2px solid var(--cor-acento-tech);
-            margin-top: 15px;
-            object-fit: contain;
-        }
-
-        @media print {
-            body { background-color: white; padding: 0; color: black; }
-            .container { box-shadow: none; border: none; max-width: 100%; margin: 0; padding: 0; border-top: none; }
-            #formulario_perguntas, button { display: none !important; }
-            #resultado { border: none; display: block; border-left: none; }
-            .secao-res, .critico, .img-anexo { page-break-inside: avoid; border: none; }
-            h2, h3 { page-break-after: avoid; }
-            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            .remover-item { display: none !important; }
-        }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <div class="header">
-        <img src="https://via.placeholder.com/200x80/000000/007BFF?text=ORA+EMPRESAS" alt="Ora Empresas" class="logo">
-        <h1>Laudo Técnico de Vistoria</h1>
-    </div>
-
-    <div id="formulario_perguntas">
-        
-        <div class="card">
-            <h3 class="card-title">0. Dados Gerais</h3>
-            <div class="form-row">
-                <div class="form-group"><label>Nome do Técnico:</label><input type="text" id="nome_tecnico" placeholder="Ex: Ronaldo"></div>
-                <div class="form-group"><label>Cidade / UF:</label><input type="text" id="cidade" placeholder="Ex: Teresina - PI"></div>
-            </div>
+# --- CÁLCULO MÉTRICAS COM LÓGICA DE SLA ---
+atrasados_count = 0
+for idx, row in df_filtrado.iterrows():
+    try:
+        if row['status'].lower() not in ['finalizado', 'cancelado', 'pausado']:
+            is_atrasado = False
             
-            <div class="form-group"><label>Nome do Evento / Cliente:</label><input type="text" id="nome_evento" placeholder="Ex: Feira Agro 2026"></div>
+            try:
+                dt_inst = datetime.strptime(str(row['instalacao']), "%d/%m/%Y").date()
+                if dt_inst < hoje_dt: is_atrasado = True
+            except: pass
             
-            <div class="form-group">
-                <label>📍 Localização Exata (Maps):</label>
-                <div style="display: flex; gap: 8px;">
-                    <input type="url" id="link_maps" placeholder="Cole o link ou clique em Capturar GPS ->">
-                    <button type="button" class="btn-secundario" id="btn_gps" onclick="capturarLocalizacao()">Capturar GPS</button>
-                </div>
-            </div>
+            try:
+                dt_atu = datetime.strptime(str(row['data_atualizacao']), "%d/%m/%Y").date()
+                if (hoje_dt - dt_atu).days > 2: is_atrasado = True
+            except: pass
 
-            <div class="form-row">
-                <div class="form-group"><label>Data da Vistoria:</label><input type="date" id="data_vistoria"></div>
-                <div class="form-group"><label>Data do Evento:</label><input type="date" id="data_evento"></div>
-            </div>
+            if is_atrasado:
+                atrasados_count += 1
+    except: pass
 
-            <div class="form-group" style="margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 15px;">
-                <label>📷 Anexar Foto ou Planta do Local (Opcional):</label>
-                <input type="file" id="imagem_local" accept="image/*">
-            </div>
+total_proj = len(df_filtrado)
+nao_iniciado = len(df_filtrado[df_filtrado['status'].str.lower() == 'não iniciado'])
+planejamento = len(df_filtrado[df_filtrado['status'].str.lower() == 'planejamento'])
+em_andamento = len(df_filtrado[df_filtrado['status'].str.lower() == 'em andamento'])
+pausados = len(df_filtrado[df_filtrado['status'].str.lower() == 'pausado'])
+finalizado = len(df_filtrado[df_filtrado['status'].str.lower() == 'finalizado'])
+taxa_conclusao = int((finalizado / total_proj * 100)) if total_proj > 0 else 0
+
+
+# === BARRA LATERAL (AGENDA) ===
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
+st.sidebar.header("📅 Agenda: Atalho Rápido")
+with st.sidebar.form("form_tarefa", clear_on_submit=True):
+    nova_tarefa = st.text_input("Nova Tarefa:")
+    data_tarefa = st.date_input("Data:", format="DD/MM/YYYY")
+    hora_tarefa = st.time_input("Hora:")
+    if st.form_submit_button("Adicionar à Agenda") and nova_tarefa:
+        data_hora_str = f"{data_tarefa.strftime('%Y-%m-%d')} {hora_tarefa.strftime('%H:%M')}"
+        sheet_agenda.append_row([nova_tarefa, data_hora_str, "Pendente"])
+        st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🚨 Alertas de Tempo")
+if not df_agenda.empty:
+    pendentes = df_agenda[df_agenda['status'].astype(str).str.strip().str.lower() == 'pendente']
+    if pendentes.empty:
+        st.sidebar.success("Nenhum compromisso pendente!")
+    else:
+        for idx, row in pendentes.iterrows():
+            try:
+                data_hora_tarefa = datetime.strptime(str(row['data_hora']), "%Y-%m-%d %H:%M")
+                atrasado = agora.replace(tzinfo=None) > data_hora_tarefa
+                tag = "🚨 ATRASADO" if atrasado else "⏳ PENDENTE"
+                cls = "alerta-atrasado" if atrasado else "alerta-pendente"
+                html_card = f'<div class="alerta-card {cls}"><strong>{tag}:</strong> {row["tarefa"]}<br><small>Prazo era: {row["data_hora"]}</small></div>'
+                st.sidebar.markdown(html_card, unsafe_allow_html=True)
+                
+                # BOTÃO DIRETO SEM CHECKBOX
+                if st.sidebar.button("✅ Concluir", key=f"side_btn_{idx}", type="primary", use_container_width=True):
+                    sheet_agenda.update_cell(int(idx) + 2, 3, "Concluído")
+                    st.rerun()
+                st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espacinho para separar os cards
+            except:
+                html_card = f'<div class="alerta-card alerta-pendente">📌 {row["tarefa"]}</div>'
+                st.sidebar.markdown(html_card, unsafe_allow_html=True)
+                
+                # BOTÃO DIRETO SEM CHECKBOX
+                if st.sidebar.button("✅ Concluir", key=f"side_btn_err_{idx}", type="primary", use_container_width=True):
+                    sheet_agenda.update_cell(int(idx) + 2, 3, "Concluído")
+                    st.rerun()
+                st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espacinho para separar os cards
+else:
+    st.sidebar.write("Sem tarefas registradas.")
+
+# === BARRA SUPERIOR PREMIUM ===
+html_logo_div = f'<div class="header-logo"><img src="data:image/png;base64,{logo_b64}" class="header-logo-img"></div>' if logo_b64 else ''
+
+st.markdown(f"""
+<div class="premium-header">
+    <div class="header-content-left">
+        <div class="neon-rocket-container">
+            <svg class="neon-rocket-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C12 2 8 6 8 11.5c0 5.5 3 8.5 4 10.5 1-2 4-5 4-10.5C16 6 12 2 12 2z" />
+                <path d="M9.5 17.5c-2.5 1.5-3.5 4-3.5 4" />
+                <path d="M14.5 17.5c2.5 1.5 3.5 4 3.5 4" />
+                <circle cx="12" cy="10" r="1.5" />
+            </svg>
         </div>
-
-        <div class="card">
-            <h3 class="card-title">1. Perfil e Criticidade</h3>
-            <div class="form-group">
-                <select id="tipo_evento" onchange="verificarTipoEvento()">
-                    <option value="Palestra/Congresso">Palestra / Congresso / Workshop</option>
-                    <option value="Feira de Negócios">Feira de Negócios / Stands</option>
-                    <option value="Gamer/E-sports">Gamer / E-sports (Campeonato)</option>
-                    <option value="Grande Porte/Massa">Show / Festival / Evento de Massa</option>
-                    <option value="Transmissão Crítica">Transmissão Crítica (Live / TV)</option>
-                </select>
-            </div>
-
-            <div id="div_stands_opcoes">
-                <div class="form-group">
-                    <label>Quantidade Estimada de Stands:</label>
-                    <input type="number" id="qtd_stands" value="0" min="0">
-                </div>
-            </div>
-
-            <div id="div_gamer_opcoes">
-                <div class="form-group">
-                    <label>Plataforma da Competição:</label>
-                    <select id="plataforma_gamer" onchange="verificarQtdPcs()">
-                        <option value="mobiles">Apenas Mobiles (Wi-Fi)</option>
-                        <option value="pcs">Apenas PCs/Consoles (Cabo)</option>
-                        <option value="ambos">Ambos (PCs e Mobiles)</option>
-                    </select>
-                </div>
-                <div class="form-group" id="div_qtd_pcs" style="display: none;">
-                    <label>Qtd. de PCs/Consoles (Cabo):</label>
-                    <input type="number" id="qtd_pcs" value="0" min="0">
-                </div>
-            </div>
+        <div class="header-title-wrapper">
+            <h1 class="header-title">Sistema de <span>Controle</span></h1>
+            <div class="header-subtitle">Gestão Avançada de Infraestrutura de Redes</div>
         </div>
-
-        <div class="card">
-            <h3 class="card-title">2. Estimativa de Carga</h3>
-            <div class="form-row">
-                <div class="form-group"><label>Público Geral:</label><input type="number" id="publico" value="0" min="0"></div>
-                <div class="form-group"><label>Staff/Equipe:</label><input type="number" id="staff" value="0" min="0"></div>
-            </div>
-            <div class="form-group"><label>Maquininhas de Cartão (POS):</label><input type="number" id="maquininhas" value="0" min="0"></div>
-        </div>
-
-        <div class="card">
-            <h3 class="card-title">3. Infraestrutura e Barreiras</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Ambiente:</label>
-                    <select id="ambiente">
-                        <option value="interno">Interno (Indoor)</option>
-                        <option value="externo">Externo (Outdoor)</option>
-                        <option value="ambos">Ambos (Indoor e Outdoor)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Barreiras:</label>
-                    <select id="divisorias">
-                        <option value="amplo">Vão Livre</option>
-                        <option value="salas">Muitas Salas</option>
-                    </select>
-                </div>
-            </div>
-            <div class="checkbox-group"><input type="checkbox" id="metal"><label><b>Obstrução Metálica:</b> Food Trucks, tendas de metal ou palcos.</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="fixacao" checked=""><label><b>Fixação Alta:</b> Existe local para APs acima de 2.5m.</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="distancia_100m"><label><b>Distância > 100m:</b> Equipamento muito distante do Rack.</label></div>
-        </div>
-
-        <div class="card">
-            <h3 class="card-title">4. Fatores Críticos</h3>
-            <div class="checkbox-group"><input type="checkbox" id="tem_live"><label><b>Transmissão:</b> Haverá Live ou captação por Imprensa.</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="sinal_ruim_4g"><label><b>Rede Móvel Ruim:</b> A internet das operadoras falha no local.</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="energia_oscila"><label><b>Energia Instável:</b> Quedas ou uso de gerador oscilante.</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="tem_hotspot"><label><b>Hotspot:</b> Cliente exige portal de login (Leads).</label></div>
-        </div>
-
-        <button onclick="gerarProjeto()">Gerar Laudo Técnico</button>
     </div>
-
-    <div id="resultado" class="card"></div>
+    {html_logo_div}
 </div>
+""", unsafe_allow_html=True)
 
-<script>
-    function formatarData(dataISO) {
-        if (!dataISO) return "Não informada";
-        let partes = dataISO.split('-');
-        return `${partes[2]}/${partes[1]}/${partes[0]}`;
-    }
+# === SISTEMA DE ABAS ===
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Dashboard", "📋 Projetos", "🚗 Cronograma de Visitas", "📆 Cronograma de Instalações", "📝 Gerenciar Agenda", "➕ Novo Projeto"])
 
-    function lerImagemAsBase64(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-            reader.readAsDataURL(file);
-        });
-    }
+# ==========================================
+# TAB 1: DASHBOARD
+# ==========================================
+with tab1:
+    html_metrics = f"""
+    <div class="neon-metric-container">
+        <div class="neon-metric-card m-total">
+            <div class="neon-metric-label">Total de Projetos</div>
+            <div class="neon-metric-value">{total_proj}</div>
+            <div class="neon-metric-sub">Cadastrados no Filtro</div>
+        </div>
+        <div class="neon-metric-card m-atraso">
+            <div class="neon-metric-label">Projetos Atrasados</div>
+            <div class="neon-metric-value">{atrasados_count}</div>
+            <div class="neon-metric-sub">Prazos vencidos</div>
+        </div>
+        <div class="neon-metric-card m-pausado">
+            <div class="neon-metric-label">Projetos Pausados</div>
+            <div class="neon-metric-value">{pausados}</div>
+            <div class="neon-metric-sub">Aguardando Retomada</div>
+        </div>
+        <div class="neon-metric-card m-taxa">
+            <div class="neon-metric-label">Taxa de Conclusão</div>
+            <div class="neon-metric-value">{taxa_conclusao}%</div>
+            <div class="neon-metric-sub">Desempenho Geral</div>
+        </div>
+        <div class="neon-metric-card m-nao-iniciado">
+            <div class="neon-metric-label">Não Iniciado</div>
+            <div class="neon-metric-value">{nao_iniciado}</div>
+            <div class="neon-metric-sub">Aguardando Ação</div>
+        </div>
+        <div class="neon-metric-card m-planejamento">
+            <div class="neon-metric-label">Planejamento</div>
+            <div class="neon-metric-value">{planejamento}</div>
+            <div class="neon-metric-sub">Mapeamento em curso</div>
+        </div>
+        <div class="neon-metric-card m-andamento">
+            <div class="neon-metric-label">Em Andamento</div>
+            <div class="neon-metric-value">{em_andamento}</div>
+            <div class="neon-metric-sub">Em execução</div>
+        </div>
+        <div class="neon-metric-card m-finalizado">
+            <div class="neon-metric-label">Finalizado</div>
+            <div class="neon-metric-value">{finalizado}</div>
+            <div class="neon-metric-sub">Projetos Entregues</div>
+        </div>
+    </div>
+    """
+    st.markdown(html_metrics, unsafe_allow_html=True)
+    st.markdown("---")
+    
+    col_hp, col_ha, col_div, col_ap, col_aa = st.columns([10, 10, 1, 10, 10]) 
+    
+    with col_hp:
+        st.markdown(f"<div class='resumo-card-title'>🚗 Projetos Hoje ({hoje_str})</div>", unsafe_allow_html=True)
+        html_hp = f"<div class='resumo-card res-hoje-proj'>"
+        hoje_visitas = df_projetos[df_projetos['visita'].str.contains(hoje_str, na=False, case=False)]
+        hoje_inst = df_projetos[df_projetos['instalacao'].str.contains(hoje_str, na=False, case=False)]
+        if hoje_visitas.empty and hoje_inst.empty:
+            html_hp += "<div class='resumo-item' style='color:#64748b;'>✓ Sem visitas ou instalações.</div>"
+        else:
+            for _, r in hoje_visitas.iterrows(): html_hp += f"<div class='resumo-item'><span>🚗</span> <span><strong>Visita:</strong> {r['cliente']} às {r.get('hr_visita', '--:--')}</span></div>"
+            for _, r in hoje_inst.iterrows(): html_hp += f"<div class='resumo-item'><span>📆</span> <span><strong>Instalação:</strong> {r['cliente']} às {r.get('hr_inst', '--:--')}</span></div>"
+        html_hp += "</div>"
+        st.markdown(html_hp, unsafe_allow_html=True)
 
-    function capturarLocalizacao() {
-        let btn = document.getElementById('btn_gps');
-        let inputLink = document.getElementById('link_maps');
+    with col_ha:
+        st.markdown(f"<div class='resumo-card-title'>📝 Agenda Hoje ({hoje_str})</div>", unsafe_allow_html=True)
+        if not df_agenda.empty:
+            agenda_hoje = df_agenda[df_agenda['data_hora'].str.startswith(hoje_iso, na=False)]
+            if agenda_hoje.empty:
+                st.markdown("<div class='resumo-card res-hoje-agen'><div class='resumo-item' style='color:#64748b;'>✓ Agenda livre.</div></div>", unsafe_allow_html=True)
+            else:
+                for idx, r in agenda_hoje.iterrows():
+                    cor = "#22c55e" if r['status'].lower() == "concluído" else "#f97316"
+                    html_item = f'<div class="resumo-card res-hoje-agen" style="min-height:50px !important; margin-bottom:5px;">📌 <span><strong>{r["tarefa"]}</strong> <small style="color:{cor};">({r["status"]})</small></span></div>'
+                    st.markdown(html_item, unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='resumo-card res-hoje-agen'><div class='resumo-item' style='color:#64748b;'>✓ Agenda livre.</div></div>", unsafe_allow_html=True)
 
-        if (!navigator.geolocation) {
-            alert("O GPS não é suportado pelo seu navegador.");
-            return;
-        }
+    with col_div: st.markdown("<div style='height: 100%; min-height: 160px; border-left: 2px dashed #475569; margin: 0 auto; width: 2px;'></div>", unsafe_allow_html=True)
 
-        btn.innerText = "⏳ Buscando...";
-        btn.style.backgroundColor = "#ff9800";
+    with col_ap:
+        st.markdown(f"<div class='resumo-card-title'>⏳ Projetos Amanhã ({amanha_str})</div>", unsafe_allow_html=True)
+        html_ap = f"<div class='resumo-card res-amanha-proj'>"
+        amanha_visitas = df_projetos[df_projetos['visita'].str.contains(amanha_str, na=False, case=False)]
+        amanha_inst = df_projetos[df_projetos['instalacao'].str.contains(amanha_str, na=False, case=False)]
+        if amanha_visitas.empty and amanha_inst.empty:
+            html_ap += "<div class='resumo-item' style='color:#64748b;'>✓ Sem visitas ou instalações.</div>"
+        else:
+            for _, r in amanha_visitas.iterrows(): html_ap += f"<div class='resumo-item'><span>🚗</span> <span><strong>Visita:</strong> {r['cliente']} às {r.get('hr_visita', '--:--')}</span></div>"
+            for _, r in amanha_inst.iterrows(): html_ap += f"<div class='resumo-item'><span>📆</span> <span><strong>Instalação:</strong> {r['cliente']} às {r.get('hr_inst', '--:--')}</span></div>"
+        html_ap += "</div>"
+        st.markdown(html_ap, unsafe_allow_html=True)
 
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                let lat = position.coords.latitude;
-                let lon = position.coords.longitude;
-                let mapsUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+    with col_aa:
+        st.markdown(f"<div class='resumo-card-title'>📝 Agenda Amanhã ({amanha_str})</div>", unsafe_allow_html=True)
+        if not df_agenda.empty:
+            agenda_amanha = df_agenda[df_agenda['data_hora'].str.startswith(amanha_iso, na=False)]
+            if agenda_amanha.empty:
+                st.markdown("<div class='resumo-card res-amanha-agen'><div class='resumo-item' style='color:#64748b;'>✓ Agenda livre.</div></div>", unsafe_allow_html=True)
+            else:
+                for idx, r in agenda_amanha.iterrows():
+                    html_item = f'<div class="resumo-card res-amanha-agen" style="min-height:50px !important; margin-bottom:5px;">📌 <span><strong>{r["tarefa"]}</strong></span></div>'
+                    st.markdown(html_item, unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='resumo-card res-amanha-agen'><div class='resumo-item' style='color:#64748b;'>✓ Agenda livre.</div></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("### 🔍 Filtros do Painel")
+    with st.container():
+        c_filt1, c_filt2 = st.columns(2)
+        c_filt1.text_input("Buscar por Cliente ou Protocolo:", key="busca_input")
+        c_filt2.selectbox("Status do Projeto:", ["Todos", "Não Iniciado", "Planejamento", "Em Andamento", "Pausado", "Finalizado", "Cancelado"], key="status_input")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 📋 Relação de Projetos")
+    
+    if not df_filtrado.empty:
+        df_display = df_filtrado[['protocolo', 'cliente', 'status', 'visita', 'instalacao', 'ap_mod', 'sw_mod', 'gw_mod', 'obs', 'data_atualizacao']].copy()
+        
+        ordem_status = ["Não Iniciado", "Planejamento", "Em Andamento", "Pausado", "Finalizado", "Cancelado"]
+        df_display['status'] = df_display['status'].str.title().replace({"Não iniciado": "Não Iniciado", "Nao iniciado": "Não Iniciado"})
+        df_display['status'] = pd.Categorical(df_display['status'], categories=ordem_status, ordered=True)
+        df_display = df_display.sort_values('status')
+        df_display.columns = ["Protocolo", "Cliente", "Status", "Visita", "Instalação", "APs", "Switch", "Gateway", "Observações ISP", "Últ. Atualização"]
+        
+        html_table = "<div class='modern-table-container'><table class='modern-table'><thead><tr>"
+        for col in df_display.columns: html_table += f"<th>{col}</th>"
+        html_table += "</tr></thead><tbody>"
+        
+        for idx, row in df_display.iterrows():
+            html_table += "<tr>"
+            for col in df_display.columns:
+                val = str(row[col])
+                if val == "nan" or val == "None" or val == "": val = "-"
                 
-                inputLink.value = mapsUrl;
-                btn.innerText = "✅ Salvo";
-                btn.style.backgroundColor = "#28a745";
-            },
-            (error) => {
-                alert("Erro ao acessar o GPS. Verifique se a localização está ativada no celular.");
-                btn.innerText = "Capturar GPS";
-                btn.style.backgroundColor = "var(--preto-texto)";
-            },
-            { enableHighAccuracy: true }
-        );
-    }
+                if col == "Status":
+                    val_lower = val.lower()
+                    if "não" in val_lower or "nao" in val_lower: badge = "badge-nao-iniciado"
+                    elif "plan" in val_lower: badge = "badge-planejamento"
+                    elif "andamento" in val_lower: badge = "badge-em-andamento"
+                    elif "paus" in val_lower: badge = "badge-pausado" 
+                    elif "final" in val_lower: badge = "badge-finalizado"
+                    elif "cancel" in val_lower: badge = "badge-cancelado"
+                    else: badge = ""
+                    
+                    alerta_sla = ""
+                    if val_lower not in ['finalizado', 'cancelado', 'pausado']:
+                        try:
+                            d_atu = datetime.strptime(str(row["Últ. Atualização"]), "%d/%m/%Y").date()
+                            if (hoje_dt - d_atu).days > 2:
+                                alerta_sla = " <span style='color:#ef4444; font-size:10px; font-weight:800; margin-left:5px; animation: pulse-red 2s infinite;'>⚠️ SLA VENCIDO</span>"
+                        except: pass
 
-    function verificarTipoEvento() {
-        let tipo = document.getElementById('tipo_evento').value;
-        let divGamer = document.getElementById('div_gamer_opcoes');
-        let divStands = document.getElementById('div_stands_opcoes');
-        
-        divGamer.style.display = (tipo === 'Gamer/E-sports') ? 'block' : 'none';
-        divStands.style.display = (tipo === 'Feira de Negócios') ? 'block' : 'none';
-        verificarQtdPcs();
-    }
-
-    function verificarQtdPcs() {
-        let plat = document.getElementById('plataforma_gamer').value;
-        let divPcs = document.getElementById('div_qtd_pcs');
-        divPcs.style.display = (plat === 'pcs' || plat === 'ambos') ? 'block' : 'none';
-    }
-
-    // Toggle de Edição com as Lixeiras (✖)
-    function toggleEdicao() {
-        let btn = document.getElementById('btn_editar_laudo');
-        let resDiv = document.getElementById('resultado');
-        let listas = document.querySelectorAll('#resultado ul');
-        
-        if (listas.length === 0) return;
-        
-        // Ativa ou desativa a classe que mostra os botões "✖"
-        resDiv.classList.toggle('modo-edicao');
-        let isEditable = resDiv.classList.contains('modo-edicao');
-
-        listas.forEach(ul => {
-            ul.contentEditable = isEditable;
-            ul.style.backgroundColor = isEditable ? '#fffde7' : 'transparent';
-            ul.style.padding = isEditable ? '15px' : '0 0 0 10px';
-            ul.style.borderRadius = '5px';
-            ul.style.border = isEditable ? '2px dashed #ff9800' : 'none';
-        });
-
-        if (isEditable) {
-            btn.innerHTML = "💾 Salvar Alterações";
-            btn.style.backgroundColor = "#28a745";
-        } else {
-            btn.innerHTML = "✏️ Editar Textos";
-            btn.style.backgroundColor = "#ff9800";
+                    html_table += f"<td><span class='status-badge {badge}'>{val}</span>{alerta_sla}</td>"
+                else:
+                    html_table += f"<td>{val}</td>"
+            html_table += "</tr>"
             
-            // Limpa as linhas que o usuário apagou no texto mas deixou o "li" vazio
-            let allLis = resDiv.querySelectorAll('li');
-            allLis.forEach(li => {
-                let textOnly = li.innerText.replace('✖', '').replace('🔹', '').replace('⚠️', '').replace('✅', '').trim();
-                if(textOnly === '') li.remove();
-            });
-        }
-    }
+        html_table += "</tbody></table></div>"
+        st.markdown(html_table, unsafe_allow_html=True)
+    else:
+        st.info("Nenhum projeto encontrado.")
 
-    function copiarTexto(app) {
-        let b = (app === 'telegram') ? '**' : '*';
-        
-        let tec = document.getElementById('nome_tecnico').value || 'Não preenchido';
-        let evt = document.getElementById('nome_evento').value || 'Não preenchido';
-        let cidade = document.getElementById('cidade').value || 'Não preenchida';
-        let locUrl = document.getElementById('link_maps').value || 'Sem link informado';
-        
-        let dVist = formatarData(document.getElementById('data_vistoria').value);
-        let dEvt = formatarData(document.getElementById('data_evento').value);
-        let tipo = document.getElementById('tipo_evento').value;
+# ==========================================
+# TAB 2: PROJETOS (PAINEL COMPLETO DE EDIÇÃO)
+# ==========================================
+with tab2:
+    st.subheader("📋 Gestão e Edição Completa de Projetos")
+    
+    col_filtro_edicao1, col_filtro_edicao2 = st.columns(2)
+    busca_edicao = col_filtro_edicao1.text_input("🔍 Buscar Cliente ou Protocolo para Editar:", key="busca_edicao")
+    filtro_status_edicao = col_filtro_edicao2.selectbox("Filtrar lista por Status:", ["Todos", "Não Iniciado", "Planejamento", "Em Andamento", "Pausado", "Finalizado", "Cancelado"], key="filtro_edicao")
 
-        let texto = `📋 ${b}LAUDO TÉCNICO - ORA EMPRESAS${b}\n\n`;
-        texto += `🏢 ${b}Cliente/Evento:${b} ${evt}\n`;
-        texto += `🏙 ${b}Cidade:${b} ${cidade}\n`;
-        texto += `📍 ${b}Local:${b} ${locUrl}\n`;
-        texto += `👷‍♂️ ${b}Técnico:${b} ${tec}\n`;
-        texto += `🗓 ${b}Vistoria:${b} ${dVist} | ${b}Evento:${b} ${dEvt}\n`;
-        texto += `🎯 ${b}Perfil:${b} ${tipo}\n\n`;
+    status_opts = ["Não Iniciado", "Planejamento", "Em Andamento", "Pausado", "Finalizado", "Cancelado"]
+    ap_opts = ["Grandstream", "Roteador Huawei", "Ubiquiti", "Outro", "Nenhum"]
+    sw_opts = ["5 Portas (Burro)", "8 Portas (Burro)", "8 Portas PoE (Gerenciável)", "16 Portas (Burro)", "16 Portas PoE (Gerenciável)", "24 Portas PoE (Gerenciável)", "48 Portas PoE (Gerenciável)", "Nenhum", "Outro"]
+    gw_opts = ["ONT", "RB MIKROTIK GR3 750", "RB MIKROTIK 760", "Roteador Huawei", "Nenhum", "Outro"]
+    st_mat_opts = ["Pendente Compra", "Reservado", "-"]
+    cabo_opts = ["Nenhum", "Cat5e", "Cat6", "Fibra Drop"]
+    rack_opts = ["Nenhum", "3U", "5U", "7U", "9U", "12U", "44U", "Outro"]
 
-        let blocos = document.querySelectorAll('.secao-res');
-        
-        blocos.forEach(bloco => {
-            let titulo = bloco.querySelector('h3');
-            if(titulo) {
-                // Remove o "✖" caso exista e processa os Emojis
-                let tText = titulo.innerText.replace('✖', '').trim();
-                let parts = tText.split(' ');
-                let emoji = parts.shift(); 
-                let restOfTitle = parts.join(' ');
+    if not df_projetos.empty:
+        for idx, row in df_projetos.iterrows():
+            if filtro_status_edicao != "Todos" and str(row['status']).strip().lower() != filtro_status_edicao.lower():
+                continue
                 
-                texto += `${emoji} ${b}${restOfTitle}${b}\n`;
+            if busca_edicao:
+                termo_busca = busca_edicao.lower()
+                cliente_str = str(row['cliente']).lower()
+                protocolo_str = str(row['protocolo']).lower()
+                if termo_busca not in cliente_str and termo_busca not in protocolo_str:
+                    continue
 
-                let itens = bloco.querySelectorAll('li');
-                itens.forEach(li => {
-                    // Ignora o ✖ na hora de copiar
-                    let liText = li.innerText.replace('✖', '').trim();
-                    texto += `${liText}\n`;
-                });
-                texto += `\n`;
-            }
-        });
-
-        let critico = document.querySelector('.critico');
-        if (critico) {
-            let cText = critico.innerText.replace('⚠️ ', '').replace('⚠️', '').trim();
-            texto += `🚨 ${b}${cText}${b}\n\n`;
-        }
-
-        navigator.clipboard.writeText(texto.trim()).then(() => {
-            let btnId = (app === 'telegram') ? 'btn_telegram' : 'btn_whatsapp';
-            let btn = document.getElementById(btnId);
-            let txtOriginal = btn.innerHTML;
-            let corOriginal = btn.style.backgroundColor;
-            
-            btn.innerHTML = "✅ Copiado!";
-            btn.style.backgroundColor = "#28a745"; 
-            
-            setTimeout(() => {
-                btn.innerHTML = txtOriginal;
-                btn.style.backgroundColor = corOriginal;
-            }, 3000);
-        }).catch(err => {
-            alert('Erro ao copiar para a área de transferência: ' + err);
-        });
-    }
-
-    async function gerarProjeto() {
-        let tec = document.getElementById('nome_tecnico').value || 'Não preenchido';
-        let evt = document.getElementById('nome_evento').value || 'Não preenchido';
-        let cidade = document.getElementById('cidade').value || 'Não preenchida';
-        let locUrl = document.getElementById('link_maps').value;
-        let htmlLocal = locUrl ? `<a href="${locUrl}" target="_blank" style="color: var(--cor-acento-tech); font-weight: bold; text-decoration: none;">📍 Ver no Google Maps</a>` : 'Não informada';
-        
-        let dVist = formatarData(document.getElementById('data_vistoria').value);
-        let dEvt = formatarData(document.getElementById('data_evento').value);
-
-        let fileInput = document.getElementById('imagem_local');
-        let imgHTML = '';
-        if (fileInput.files && fileInput.files[0]) {
-            let imgDataUrl = await lerImagemAsBase64(fileInput.files[0]);
-            imgHTML = `<div style="text-align: center;"><img src="${imgDataUrl}" class="img-anexo" alt="Foto do Local"></div>`;
-        }
-
-        let tipo = document.getElementById('tipo_evento').value;
-        let pub = parseInt(document.getElementById('publico').value) || 0;
-        let stf = parseInt(document.getElementById('staff').value) || 0;
-        let maq = parseInt(document.getElementById('maquininhas').value) || 0;
-        let total = pub + stf + maq;
-        
-        let qtd_stands = (tipo === 'Feira de Negócios') ? (parseInt(document.getElementById('qtd_stands').value) || 0) : 0;
-
-        let ambiente = document.getElementById('ambiente').value;
-        let area_aberta = (ambiente === 'externo' || ambiente === 'ambos');
-        let divisorias = document.getElementById('divisorias').value;
-        let metal = document.getElementById('metal').checked;
-        let fixacao = document.getElementById('fixacao').checked;
-        let longa_distancia = document.getElementById('distancia_100m').checked;
-        
-        let live = document.getElementById('tem_live').checked;
-        let sinal_rede_movel = document.getElementById('sinal_ruim_4g').checked;
-        let energia = document.getElementById('energia_oscila').checked;
-        let hotspot = document.getElementById('tem_hotspot').checked;
-
-        let gamer = (tipo === 'Gamer/E-sports');
-        let plat_gamer = document.getElementById('plataforma_gamer').value;
-        let qtd_pcs = gamer && (plat_gamer === 'pcs' || plat_gamer === 'ambos') ? (parseInt(document.getElementById('qtd_pcs').value) || 0) : 0;
-
-        let eq = []; let alertas = []; let dicas = [];
-        let aps_qtd = 0;
-
-        let precisa_rb = (total > 30 || hotspot || gamer || tipo === "Transmissão Crítica" || tipo === "Grande Porte/Massa" || qtd_stands > 0);
-        if (!precisa_rb) {
-            eq.push("01x ONU Wi-Fi AX (Roteando) ou Roteador Giga");
-        } else {
-            if (total <= 50 && qtd_stands <= 20) eq.push("01x ONU em Bridge + 01x Mikrotik (RB 750Gr3)");
-            else if (total < 150 && qtd_stands <= 50) eq.push("01x ONU em Bridge + 01x Mikrotik (RB 750Gr3 ou 760iGS)");
-            else if (total < 300 && qtd_stands <= 80) eq.push("01x ONU em Bridge + 01x Mikrotik (RB 760iGS ou superior)");
-            else eq.push("01x ONU em Bridge + 01x Mikrotik Alta Capacidade (RB 4011 ou CCR)");
-
-            let cap = area_aberta ? 100 : 80; 
-            if (metal) cap = cap * 0.8; 
-            
-            aps_qtd = Math.max(1, Math.ceil(total / cap));
-            
-            if (tipo === 'Feira de Negócios' && qtd_stands > 0) {
-                aps_qtd = Math.max(1, Math.ceil(qtd_stands / 8)); 
-            }
-
-            if (divisorias === "salas" && aps_qtd < 6) aps_qtd = 6;
-            if (tipo === "Grande Porte/Massa" && aps_qtd < 3) aps_qtd = 3;
-            if (gamer && plat_gamer === 'pcs' && total <= maq) aps_qtd = 0;
-
-            if (aps_qtd > 0) {
-                let modelo_ap = "";
-                if (ambiente === 'externo') modelo_ap = "Grandstream GWN7660LR / GWN7664LR (Outdoor)";
-                else if (ambiente === 'interno') modelo_ap = "Grandstream GWN7660 / GWN7664 (Indoor)";
-                else modelo_ap = "Mix de APs Grandstream (Outdoor e Indoor)";
+            with st.container(border=True):
+                col_c1, col_c2, col_c3 = st.columns([3, 2, 3])
+                with col_c1:
+                    st.markdown(f"**{row['cliente']}**")
+                    st.caption(f"Protocolo: {row['protocolo']}")
+                with col_c2:
+                    st.markdown(f"Status: **{str(row['status']).title()}**")
+                    st.caption(f"Atualizado em: {row.get('data_atualizacao', hoje_str)}")
+                with col_c3:
+                    obs_andamento = row.get('obs_andamento', '')
+                    if str(row['status']).strip().lower() == 'pausado':
+                        st.warning(f"⏸️ PROJETO PAUSADO. Motivo: {obs_andamento}")
+                    elif obs_andamento and str(obs_andamento).strip() not in ["", "nan", "None"]:
+                        st.warning(f"⚠️ Gargalo: {obs_andamento}")
+                    else:
+                        st.success("✅ No prazo / Sem gargalos")
                 
-                eq.push(`${aps_qtd}x Access Points ${modelo_ap}`);
+                with st.expander("✏️ Editar Projeto (Isso renova o SLA para hoje)"):
+                    with st.form(key=f"form_edit_full_{idx}"):
+                        st.markdown("##### 1. Status e Andamento")
+                        c_e1, c_e2 = st.columns(2)
+                        st_atual = status_opts[safe_idx(status_opts, row.get('status', 'Não Iniciado'), 0)]
+                        novo_status = c_e1.selectbox("Status Geral", status_opts, index=status_opts.index(st_atual), key=f"st_f_{idx}")
+                        novo_gargalo = c_e2.text_input("Anotação de Gargalo (Ou Motivo da Pausa)", value=str(row.get('obs_andamento', '')).replace('nan',''), key=f"obs_and_{idx}")
+                        
+                        st.markdown("##### 2. Datas e Cronograma")
+                        c_c1, c_c2, c_c3, c_c4 = st.columns(4)
+                        nova_visita = c_c1.text_input("Data Visita", value=str(row.get('visita', '')).replace('nan',''), key=f"dt_v_{idx}")
+                        nova_hr_visita = c_c2.text_input("Hora Visita", value=str(row.get('hr_visita', '')).replace('nan',''), key=f"hr_v_{idx}")
+                        nova_inst = c_c3.text_input("Data Instalação", value=str(row.get('instalacao', '')).replace('nan',''), key=f"dt_i_{idx}")
+                        nova_hr_inst = c_c4.text_input("Hora Instalação", value=str(row.get('hr_inst', '')).replace('nan',''), key=f"hr_i_{idx}")
+
+                        st.markdown("##### 3. Equipamentos Principais")
+                        cap1, cap2, cap3 = st.columns([2, 1, 2])
+                        v_ap = ap_opts[safe_idx(ap_opts, row.get('ap_mod', ''), ap_opts.index("Nenhum"))]
+                        v_ap_st = st_mat_opts[safe_idx(st_mat_opts, row.get('ap_st', ''), 2)]
+                        novo_ap = cap1.selectbox("Modelo AP", ap_opts, index=ap_opts.index(v_ap), key=f"ap_m_{idx}")
+                        novo_ap_qtd = cap2.number_input("Qtd AP", value=safe_int(row.get('ap_qtd', 0)), key=f"ap_q_{idx}")
+                        novo_ap_st = cap3.selectbox("Status Compra AP", st_mat_opts, index=st_mat_opts.index(v_ap_st), key=f"ap_s_{idx}")
+
+                        csw1, csw2, csw3 = st.columns([2, 1, 2])
+                        v_sw = sw_opts[safe_idx(sw_opts, row.get('sw_mod', ''), sw_opts.index("Nenhum"))]
+                        v_sw_st = st_mat_opts[safe_idx(st_mat_opts, row.get('sw_st', ''), 2)]
+                        novo_sw = csw1.selectbox("Modelo Switch", sw_opts, index=sw_opts.index(v_sw), key=f"sw_m_{idx}")
+                        novo_sw_qtd = csw2.number_input("Qtd SW", value=safe_int(row.get('sw_qtd', 0)), key=f"sw_q_{idx}")
+                        novo_sw_st = csw3.selectbox("Status Compra SW", st_mat_opts, index=st_mat_opts.index(v_sw_st), key=f"sw_s_{idx}")
+
+                        cgw1, cgw2, cgw3 = st.columns([2, 1, 2])
+                        v_gw = gw_opts[safe_idx(gw_opts, row.get('gw_mod', ''), gw_opts.index("Nenhum"))]
+                        v_gw_st = st_mat_opts[safe_idx(st_mat_opts, row.get('gw_st', ''), 2)]
+                        novo_gw = cgw1.selectbox("Modelo Roteador", gw_opts, index=gw_opts.index(v_gw), key=f"gw_m_{idx}")
+                        novo_gw_qtd = cgw2.number_input("Qtd Roteador", value=safe_int(row.get('gw_qtd', 0)), key=f"gw_q_{idx}")
+                        novo_gw_st = cgw3.selectbox("Status Compra GW", st_mat_opts, index=st_mat_opts.index(v_gw_st), key=f"gw_s_{idx}")
+
+                        st.markdown("##### 4. Infraestrutura e Observações Gerais")
+                        cinf1, cinf2, cinf3 = st.columns([2, 1, 2])
+                        v_cab = cabo_opts[safe_idx(cabo_opts, row.get('cabo_tipo', ''), cabo_opts.index("Nenhum"))]
+                        v_rack = rack_opts[safe_idx(rack_opts, row.get('rack_tam', ''), rack_opts.index("Nenhum"))]
+                        novo_cabo = cinf1.selectbox("Tipo de Cabo", cabo_opts, index=cabo_opts.index(v_cab), key=f"cab_t_{idx}")
+                        novo_cabo_qtd = cinf2.number_input("Qtd Cabo", value=safe_int(row.get('cabo_qtd', 0)), key=f"cab_q_{idx}")
+                        novo_rack = cinf3.selectbox("Tamanho Rack", rack_opts, index=rack_opts.index(v_rack), key=f"rk_t_{idx}")
+
+                        nova_obs = st.text_area("Observações Gerais (Detalhes do ISP)", value=str(row.get('obs', '')).replace('nan',''), key=f"obs_geral_{idx}")
+                        
+                        if st.form_submit_button("💾 Salvar Todas as Alterações", type="primary"):
+                            df_projetos.loc[idx, 'status'] = str(novo_status)
+                            df_projetos.loc[idx, 'obs_andamento'] = str(novo_gargalo)
+                            df_projetos.loc[idx, 'visita'] = str(nova_visita)
+                            df_projetos.loc[idx, 'hr_visita'] = str(nova_hr_visita)
+                            df_projetos.loc[idx, 'instalacao'] = str(nova_inst)
+                            df_projetos.loc[idx, 'hr_inst'] = str(nova_hr_inst)
+                            df_projetos.loc[idx, 'ap_mod'] = str(novo_ap)
+                            df_projetos.loc[idx, 'ap_qtd'] = str(novo_ap_qtd)
+                            df_projetos.loc[idx, 'ap_st'] = str(novo_ap_st)
+                            df_projetos.loc[idx, 'sw_mod'] = str(novo_sw)
+                            df_projetos.loc[idx, 'sw_qtd'] = str(novo_sw_qtd)
+                            df_projetos.loc[idx, 'sw_st'] = str(novo_sw_st)
+                            df_projetos.loc[idx, 'gw_mod'] = str(novo_gw)
+                            df_projetos.loc[idx, 'gw_qtd'] = str(novo_gw_qtd)
+                            df_projetos.loc[idx, 'gw_st'] = str(novo_gw_st)
+                            df_projetos.loc[idx, 'cabo_tipo'] = str(novo_cabo)
+                            df_projetos.loc[idx, 'cabo_qtd'] = str(novo_cabo_qtd)
+                            df_projetos.loc[idx, 'rack_tam'] = str(novo_rack)
+                            df_projetos.loc[idx, 'obs'] = str(nova_obs)
+                            df_projetos.loc[idx, 'data_atualizacao'] = hoje_str 
+                            
+                            df_para_gravar = df_projetos[colunas_completas].fillna("")
+                            dados_atualizados = [df_para_gravar.columns.values.tolist()] + df_para_gravar.values.tolist()
+                            sheet_projetos.clear()
+                            sheet_projetos.update(values=dados_atualizados, range_name='A1')
+                            st.success(f"Projeto de {row['cliente']} atualizado!")
+                            st.rerun()
+    else:
+        st.info("Nenhum projeto encontrado.")
+
+# ==========================================
+# TAB 3 e 4: CRONOGRAMAS
+# ==========================================
+with tab3:
+    st.subheader("🚗 Cronograma de Visitas e Vistorias")
+    if not df_projetos.empty:
+        df_visitas = df_projetos[~df_projetos['visita'].str.lower().isin(["a definir", "", "nan", "não realizada"])].copy()
+        if not df_visitas.empty:
+            for idx, row in df_visitas.iterrows():
+                with st.expander(f"🚗 Visita: {row['visita']} às {row.get('hr_visita', '--:--')} — {row['cliente']}"):
+                    st.write(f"**Protocolo:** {row['protocolo']} | **Status:** {row['status']}")
+                    st.write(f"**Observações:** {row['obs']}")
+        else:
+            st.info("Nenhuma visita agendada.")
+
+with tab4:
+    st.subheader("📆 Cronograma Geral de Instalações")
+    if not df_projetos.empty:
+        df_inst = df_projetos[~df_projetos['instalacao'].str.lower().isin(["a definir", "", "nan"])].copy()
+        if not df_inst.empty:
+            for idx, row in df_inst.iterrows():
+                with st.expander(f"📅 Instalação: {row['instalacao']} às {row.get('hr_inst', '--:--')} — {row['cliente']}"):
+                    st.write(f"**Protocolo:** {row['protocolo']}")
+                    st.write(f"- Rack: {row.get('rack_tam', 'Nenhum')} | APs: {row['ap_mod']} ({row['ap_qtd']} un) | Switch: {row['sw_mod']} | Roteador: {row['gw_mod']}")
+        else:
+            st.info("Nenhuma instalação agendada.")
+
+# ==========================================
+# TAB 5: GERENCIAR AGENDA
+# ==========================================
+with tab5:
+    st.subheader("📝 Gestão de Agenda Diária")
+    col_kanban, col_cal = st.columns([2.5, 1.5])
+    with col_kanban:
+        cols_data = {"Atrasados": "", "Hoje": "", "Próximos": "", "Concluídos": ""}
+        if not df_agenda.empty:
+            for _, row in df_agenda.iterrows():
+                tarefa = str(row['tarefa']).strip()
+                data_str = str(row['data_hora']).strip()
+                status = str(row['status']).strip().title()
+                card_html = f"<div class='k-card'><div class='k-card-title'>{tarefa}</div><div style='font-size: 11px; color: #94a3b8;'>📅 {data_str}</div></div>"
+                if status == 'Concluído': cols_data["Concluídos"] += card_html
+                elif status == 'Pendente':
+                    try:
+                        dt = datetime.strptime(data_str, "%Y-%m-%d %H:%M")
+                        if dt.replace(tzinfo=None) < agora.replace(tzinfo=None): cols_data["Atrasados"] += card_html
+                        elif dt.date() == agora.date(): cols_data["Hoje"] += card_html
+                        else: cols_data["Próximos"] += card_html
+                    except:
+                        cols_data["Próximos"] += card_html
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.markdown(f"<div class='k-col-container'><div class='k-col-header'>🚨 Atrasados</div>{cols_data['Atrasados'] if cols_data['Atrasados'] else '-'}</div>", unsafe_allow_html=True)
+        k2.markdown(f"<div class='k-col-container'><div class='k-col-header'>📅 Hoje</div>{cols_data['Hoje'] if cols_data['Hoje'] else '-'}</div>", unsafe_allow_html=True)
+        k3.markdown(f"<div class='k-col-container'><div class='k-col-header'>🔜 Próximos</div>{cols_data['Próximos'] if cols_data['Próximos'] else '-'}</div>", unsafe_allow_html=True)
+        k4.markdown(f"<div class='k-col-container' style='opacity:0.8;'><div class='k-col-header'>✅ Concluídos</div>{cols_data['Concluídos'] if cols_data['Concluídos'] else '-'}</div>", unsafe_allow_html=True)
+
+    with col_cal:
+        def prev_m(): st.session_state.cal_month = 12 if st.session_state.cal_month == 1 else st.session_state.cal_month - 1; st.session_state.cal_year -= 1 if st.session_state.cal_month == 12 else 0
+        def next_m(): st.session_state.cal_month = 1 if st.session_state.cal_month == 12 else st.session_state.cal_month + 1; st.session_state.cal_year += 1 if st.session_state.cal_month == 1 else 0
+        def set_cal_date(d): st.session_state.cal_date = d
+
+        hc1, hc2, hc3 = st.columns([1, 2, 1])
+        hc1.button("◀", on_click=prev_m, key="btn_prev", use_container_width=True)
+        meses = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+        hc2.markdown(f"<div style='text-align:center; font-weight:bold; margin-top:8px;'>{meses[st.session_state.cal_month]} {st.session_state.cal_year}</div>", unsafe_allow_html=True)
+        hc3.button("▶", on_click=next_m, key="btn_next", use_container_width=True)
+        
+        dias_com_evento = set()
+        if not df_agenda.empty:
+            for _, r in df_agenda.iterrows():
+                try: dias_com_evento.add(datetime.strptime(str(r['data_hora']).strip(), "%Y-%m-%d %H:%M").date())
+                except: pass
                 
-                if (aps_qtd === 1) eq.push("01x Fonte PoE Gigabit (Injetor)");
-                else if (aps_qtd <= 4) eq.push("01x Switch PoE 5 Portas (Para os APs Grandstream)");
-                else if (aps_qtd <= 7) eq.push("01x Switch PoE 8 Portas (Para os APs Grandstream)");
-                else if (aps_qtd <= 15) eq.push("01x Switch PoE 16 Portas (Para os APs Grandstream)");
-                else eq.push("01x Switch PoE 24 Portas (Para os APs Grandstream)");
+        dias_semana = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+        cols_dias = st.columns(7)
+        for i, d in enumerate(dias_semana): cols_dias[i].markdown(f"<div style='text-align:center; font-size:12px;'>{d}</div>", unsafe_allow_html=True)
+            
+        cal_matrix = calendar.monthcalendar(st.session_state.cal_year, st.session_state.cal_month)
+        for semana in cal_matrix:
+            cw = st.columns(7)
+            for i, dia in enumerate(semana):
+                if dia != 0:
+                    dt_atual = date(st.session_state.cal_year, st.session_state.cal_month, dia)
+                    tem_evento = dt_atual in dias_com_evento
+                    selecionado = (dt_atual == st.session_state.cal_date)
+                    label = f"{dia} 🔵" if tem_evento else str(dia)
+                    cw[i].button(label, key=f"cal_{dt_atual}", type="primary" if selecionado else "secondary", use_container_width=True, on_click=set_cal_date, args=(dt_atual,))
 
-                alertas.push("REGRA DE OURO: O Wi-Fi nativo da ONU DEVE ESTAR DESABILITADO. Toda a rede sem fio será emitida pelos APs Grandstream.");
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("⚙️ Editar Status ou Apagar Tarefas"):
+        if not df_agenda.empty:
+            config_colunas_agenda = {"status": st.column_config.SelectboxColumn("Status", options=["Pendente", "Concluído", "Cancelado"], required=True)}
+            with st.form("form_agenda_edit"):
+                df_agenda_limpo = df_agenda.drop(columns=['data_s'], errors='ignore')
+                df_agenda_editado = st.data_editor(df_agenda_limpo, use_container_width=True, num_rows="dynamic", column_config=config_colunas_agenda, hide_index=True)
+                if st.form_submit_button("💾 Salvar Agenda", type="primary"):
+                    df_agenda_editado = df_agenda_editado.fillna("")
+                    dados_agenda_atualizados = [df_agenda_editado.columns.values.tolist()] + df_agenda_editado.values.tolist()
+                    sheet_agenda.clear()
+                    sheet_agenda.update(values=dados_agenda_atualizados, range_name='A1')
+                    st.success("Atualizado!")
+                    st.rerun()
 
-                if (aps_qtd > 2) {
-                    alertas.push("MAPA DE CALOR NECESSÁRIO: Eventos que exigem mais de 2 APs necessitam da elaboração de um mapa de calor e análise de canais para garantir Roaming.");
-                }
-            }
-        }
-
-        if (qtd_pcs > 0) {
-            if (qtd_pcs <= 4) eq.push("01x Switch Gigabit 5 Portas (Rede PCs)");
-            else if (qtd_pcs <= 7) eq.push("01x Switch Gigabit 8 Portas (Rede PCs)");
-            else if (qtd_pcs <= 15) eq.push("01x Switch Gigabit 16 Portas (Rede PCs)");
-            else eq.push("01x Switch Gigabit 24 Portas (Rede PCs)");
-        }
-
-        if (aps_qtd > 0 || qtd_pcs > 0) {
-            if (ambiente === 'ambos') {
-                eq.push("01x Rack Indoor + 01x Caixa Hermética (Para a área externa)");
-            } else {
-                eq.push(ambiente === 'externo' ? "01x Caixa Hermética / Rack Outdoor (Proteção climática)" : "01x Rack Indoor / Parede");
-            }
-        }
+# ==========================================
+# TAB 6: NOVO PROJETO
+# ==========================================
+with tab6:
+    st.subheader("➕ Cadastrar Novo Projeto")
+    with st.form("form_cadastro", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        prot = c1.text_input("Número do Protocolo")
+        cli = c2.text_input("Nome do Cliente")
         
-        // ADD RÉGUA DE TOMADAS PDU
-        if (total > 0 || aps_qtd > 0) {
-            eq.push("01x Régua de Tomadas Padrão Rack (Filtro de linha / PDU)");
-        }
-
-        if (longa_distancia) {
-            eq.push("01x Par de Conversores de Mídia (A e B) + Bobina Cabo Drop Óptico");
-            alertas.push("O limite de rede metálica é 100m. Utilize conversores e fibra óptica para equipamentos distantes.");
-        }
-        if (tipo === "Gamer/E-sports" || tipo === "Transmissão Crítica" || tipo === "Grande Porte/Massa") {
-            eq.push("01x Kit Antena Starlink (Link de Backup / Failover)");
-            alertas.push("EVENTO CRÍTICO: Configure a Starlink na porta WAN2 da Mikrotik com Failover.");
-        }
-        if (total > 50 || live || energia || gamer || tipo === "Transmissão Crítica" || qtd_stands > 20) {
-            eq.push("01x Nobreak Senoidal (Acondicionamento obrigatório de energia)");
-        }
-
-        if (total > 250) alertas.push("ESTOURO DE DHCP: A quantidade de usuários excede uma rede /24. Na Mikrotik, altere o Pool e a máscara para /23 ou /22.");
-        if (metal && aps_qtd > 0) alertas.push("OBSTRUÇÃO METÁLICA: O sinal sofre reflexão no metal. Evite instalar os APs muito colados às estruturas.");
-        if (!fixacao && aps_qtd > 0) alertas.push("ABSORÇÃO DE SINAL: Sem fixação alta, utilize pedestais/tripés para os APs (Mínimo 2.5m).");
-        if (live) alertas.push("LIVE DETECTADA: É proibido rodar a Live via Wi-Fi. Puxe um cabo de rede direto para a máquina de transmissão.");
-        if (sinal_rede_movel && aps_qtd > 0) dicas.push("A rede móvel ruim sobrecarregará o Wi-Fi. Crie regras no Queue limitando a banda (Ex: 5 Mega/usuário).");
+        stat = st.selectbox("Status", ["Não Iniciado", "Planejamento", "Em Andamento", "Pausado", "Finalizado", "Cancelado"])
         
-        if (hotspot && maq > 0) dicas.push("Crie uma rede (SSID) separada e SEM hotspot, dedicada exclusivamente para as maquininhas de cartão.");
-        if (tipo === "Feira de Negócios") dicas.push("Poluição de RF alta. Fixe os canais dos APs Grandstream apenas em 5GHz e evite canalização automática.");
-        if (gamer && qtd_pcs > 0) dicas.push("Crie uma VLAN exclusiva para a porta do Switch Gamer, separando totalmente o tráfego dos PCs do Wi-Fi do público.");
+        d1, d2, d3, d4 = st.columns(4)
+        dt_visita = d1.date_input("Data Visita", value=None)
+        hr_visita = d2.time_input("Hora Visita", value=None)
+        dt_inst = d3.date_input("Data Instalação", value=None)
+        hr_inst = d4.time_input("Hora Instalação", value=None)
+        
+        if st.form_submit_button("🚀 Gravar Projeto", type="primary"):
+            if prot and cli:
+                dt_v_str = dt_visita.strftime("%d/%m/%Y") if dt_visita else "A definir"
+                hr_v_str = hr_visita.strftime("%H:%M") if hr_visita else "--:--"
+                dt_i_str = dt_inst.strftime("%d/%m/%Y") if dt_inst else "A definir"
+                hr_i_str = hr_inst.strftime("%H:%M") if hr_inst else "--:--"
 
-        let txt_ambiente = ambiente === 'externo' ? 'Área Externa (Outdoor)' : (ambiente === 'interno' ? 'Área Interna (Indoor)' : 'Misto (Indoor + Outdoor)');
-        let txt_divisorias = divisorias === 'salas' ? 'Com Divisórias/Salas' : 'Vão Livre';
-        let inf_stands = qtd_stands > 0 ? `   |   <b>Stands:</b> ${qtd_stands}` : '';
-
-        let resDiv = document.getElementById('resultado');
-        resDiv.innerHTML = `
-            <h2 style="color: var(--cor-acento-tech); font-size: 20px; text-transform: uppercase; margin-top: 0; border-bottom: 2px solid var(--cor-acento-tech); padding-bottom: 10px;">📋 Laudo Técnico de Vistoria</h2>
-            
-            <div class="secao-res" style="background: var(--cinza-fundo-card); border: 1px solid #eee; padding: 15px; border-radius: 6px; border-left: 5px solid var(--cor-acento-tech);">
-                <p style="margin: 0 0 8px 0;"><b>Cliente / Evento:</b> ${evt}   |   <b>Cidade:</b> ${cidade}</p>
-                <p style="margin: 0 0 8px 0;"><b>Localização GPS:</b> ${htmlLocal}</p>
-                <p style="margin: 0 0 8px 0;"><b>Técnico Responsável:</b> ${tec}</p>
-                <p style="margin: 0 0 8px 0;"><b>Data da Vistoria:</b> ${dVist}   |   <b>Data do Evento:</b> ${dEvt}</p>
-                <hr style="border: 0; border-top: 1px dashed #ccc; margin: 12px 0;">
-                <p style="margin: 0 0 8px 0;"><b>Tipo de Evento:</b> ${tipo}${inf_stands}</p>
-                <p style="margin: 0 0 8px 0;"><b>Conexões Estimadas:</b> ${total} dispositivos</p>
-                <p style="margin: 0;"><b>Ambiente Físico:</b> ${txt_ambiente} - ${txt_divisorias}</p>
-            </div>
-
-            ${imgHTML}
-
-            ${((tipo === "Grande Porte/Massa" || total > 400 || aps_qtd >= 10) ? '<div class="critico" style="margin-top: 20px;">⚠️ PROJETO ALTA DENSIDADE / EXIGE SITE SURVEY DO ENGENHEIRO</div>' : '')}
-            
-            <div class="secao-res" style="margin-top: 20px;">
-                <h3><span class="remover-item" onclick="this.parentElement.parentElement.remove()" title="Remover Seção">✖</span>📦 Lista de Hardware Exigida</h3>
-                <ul>
-                ${eq.map(i => `<li><span class="remover-item" onclick="this.parentElement.remove()" title="Remover Item">✖</span><div>🔹 <b>${i.substring(0, i.indexOf(' ') > 0 ? i.indexOf(' ') : i.length)}</b> ${i.substring(i.indexOf(' ') + 1)}</div></li>`).join('')}
-                </ul>
-            </div>
-            
-            ${alertas.length ? `<div class="secao-res">
-                <h3><span class="remover-item" onclick="this.parentElement.parentElement.remove()" title="Remover Seção">✖</span>🚨 Alertas Críticos de Engenharia</h3>
-                <ul>
-                ${alertas.map(i => `<li class="alerta-item"><span class="remover-item" onclick="this.parentElement.remove()" title="Remover Item">✖</span><div>⚠️ ${i}</div></li>`).join('')}
-                </ul>
-            </div>` : ''}
-            
-            ${dicas.length ? `<div class="secao-res">
-                <h3><span class="remover-item" onclick="this.parentElement.parentElement.remove()" title="Remover Seção">✖</span>💡 Recomendações de Configuração</h3>
-                <ul>
-                ${dicas.map(i => `<li class="dica-item"><span class="remover-item" onclick="this.parentElement.remove()" title="Remover Item">✖</span><div>✅ ${i}</div></li>`).join('')}
-                </ul>
-            </div>` : ''}
-
-            <div class="botoes-acao">
-                <button class="btn-acao btn-editar" id="btn_editar_laudo" onclick="toggleEdicao()">✏️ Editar / Apagar</button>
-                <button class="btn-acao btn-whatsapp" id="btn_whatsapp" onclick="copiarTexto('whatsapp')">💬 Copiar p/ WhatsApp</button>
-                <button class="btn-acao btn-telegram" id="btn_telegram" onclick="copiarTexto('telegram')">✈️ Copiar p/ Telegram</button>
-                <button class="btn-acao btn-imprimir" onclick="window.print()">🖨️ Imprimir PDF</button>
-            </div>
-        `;
-            
-        resDiv.style.display = 'block';
-        resDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-</script>
-<script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js')
-            .then((reg) => console.log('Service Worker registrado com sucesso!', reg))
-            .catch((err) => console.log('Erro ao registrar Service Worker:', err));
-    }
-</script>
-
-</body>
-</html>
+                sheet_projetos.append_row([
+                    prot, cli, dt_v_str, dt_i_str, stat,
+                    "Nenhum", 0, "-", "Nenhum", 0, "-",
+                    "Nenhum", 0, "-", "", "", 
+                    hr_v_str, hr_i_str, "Nenhum", 0, "Nenhum",
+                    "Nenhum", "-", "-", hoje_str
+                ])
+                st.success("Gravado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Preencha Protocolo e Cliente.")
